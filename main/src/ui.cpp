@@ -1729,7 +1729,7 @@ void Ui::apply_snapshot(const PrinterSnapshot& snapshot) {
   if (!initialized_) {
     return;
   }
-  if (scrolling_) {
+  if (scrolling_ || pointer_down_.load(std::memory_order_relaxed)) {
     last_snapshot_ = snapshot;
     deferred_snapshot_ = snapshot;
     deferred_snapshot_pending_ = true;
@@ -1761,7 +1761,7 @@ void Ui::apply_snapshot(const PrinterSnapshot& snapshot) {
   }
 
   last_snapshot_ = snapshot;
-  if (scrolling_) {
+  if (scrolling_ || pointer_down_.load(std::memory_order_relaxed)) {
     deferred_snapshot_ = snapshot;
     deferred_snapshot_pending_ = true;
     return;
@@ -3042,6 +3042,7 @@ esp_err_t Ui::build_dashboard() {
   lv_obj_clear_flag(remaining_row_, LV_OBJ_FLAG_SCROLLABLE);
   // Tap to toggle between remaining duration and predicted finish time.
   lv_obj_add_flag(remaining_row_, LV_OBJ_FLAG_CLICKABLE);
+  enable_touch_bubble(remaining_row_);
   lv_obj_add_event_cb(remaining_row_, &Ui::remaining_row_event_cb, LV_EVENT_CLICKED, this);
 
   remaining_prefix_label_ = lv_label_create(remaining_row_);
@@ -3502,6 +3503,7 @@ void Ui::set_active_page(int page) {
   // Ring timer resume is handled by apply_ring_visual_locked below.
   apply_page_visibility();
   if (deferred_snapshot_pending_) {
+    deferred_snapshot_pending_ = false;
     apply_snapshot_locked(deferred_snapshot_, true);
   } else if (previous_page != clamped_page) {
     apply_snapshot_locked(last_snapshot_, true);
@@ -3660,6 +3662,7 @@ void Ui::handle_screen_event(lv_event_t* event) {
   lv_indev_get_point(indev, &point);
 
   if (code == LV_EVENT_PRESSED) {
+    pointer_down_.store(true, std::memory_order_relaxed);
     set_pager_scroll_locked(false);
     if (screen_power_mode_ == ScreenPowerMode::kOff) {
       // First touch wakes the screen; a second touch performs UI actions.
@@ -3736,34 +3739,43 @@ void Ui::handle_screen_event(lv_event_t* event) {
     return;
   }
 
-  if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && gesture_active_) {
-    note_activity(false);
-    const int dx = static_cast<int>(point.x - gesture_start_x_);
-    const int dy = static_cast<int>(gesture_start_y_ - point.y);
-    const int abs_dx = std::abs(dx);
-    const int abs_dy = std::abs(dy);
-    const bool swipe_locked = swipe_switched_;
+  if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+    pointer_down_.store(false, std::memory_order_relaxed);
+    if (gesture_active_) {
+      note_activity(false);
+      const int dx = static_cast<int>(point.x - gesture_start_x_);
+      const int dy = static_cast<int>(gesture_start_y_ - point.y);
+      const int abs_dx = std::abs(dx);
+      const int abs_dy = std::abs(dy);
+      const bool swipe_locked = swipe_switched_;
 
-    gesture_active_ = false;
-    swipe_switched_ = false;
-    set_pager_scroll_locked(false);
-    if (overlay_visible_) {
-      lv_obj_add_flag(brightness_overlay_, LV_OBJ_FLAG_HIDDEN);
-      overlay_visible_ = false;
-      return;
+      gesture_active_ = false;
+      swipe_switched_ = false;
+      set_pager_scroll_locked(false);
+      if (overlay_visible_) {
+        lv_obj_add_flag(brightness_overlay_, LV_OBJ_FLAG_HIDDEN);
+        overlay_visible_ = false;
+      } else if (!swipe_locked) {
+        // Horizontal page swiping is handled by the LVGL pager (flex-row +
+        // LV_SCROLL_SNAP_NONE → handle_pager_event snaps to nearest page on SCROLL_END).
+        // Only handle taps here (camera refresh on page 3).
+        if (active_page_ == kPageIdxCamera && camera_page_available_ && abs_dx < 12 && abs_dy < 12) {
+          std::lock_guard<std::mutex> lock(camera_refresh_mutex_);
+          camera_refresh_requested_ = true;
+        }
+      }
     }
-    if (swipe_locked) {
-      return;
-    }
-
-    // Horizontal page swiping is handled by the LVGL pager (flex-row +
-    // LV_SCROLL_SNAP_NONE → handle_pager_event snaps to nearest page on SCROLL_END).
-    // Only handle taps here (camera refresh on page 3).
-    if (active_page_ == kPageIdxCamera && camera_page_available_ && abs_dx < 12 && abs_dy < 12) {
-      std::lock_guard<std::mutex> lock(camera_refresh_mutex_);
-      camera_refresh_requested_ = true;
-    }
+    flush_deferred_snapshot_if_idle_locked();
   }
+}
+
+void Ui::flush_deferred_snapshot_if_idle_locked() {
+  if (!deferred_snapshot_pending_ || scrolling_ ||
+      pointer_down_.load(std::memory_order_relaxed)) {
+    return;
+  }
+  deferred_snapshot_pending_ = false;
+  apply_snapshot_locked(deferred_snapshot_, false);
 }
 
 void Ui::update_portal_access_visuals_locked() {

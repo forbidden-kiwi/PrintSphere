@@ -24,6 +24,8 @@ on the display. OTA-compatible with v1.6.2 (no partition table change).
   short display names no longer splits a multi-byte character in the middle.
 - **Faster page flicks**: Short, quick swipes advance the pager even when the
   touch path only reports a small pixel delta. Snap animation is shorter.
+- **Main-page swipes no longer stall on live status**: Finger-down defers MQTT
+  snapshot paints so the LVGL worker can keep reading touch.
 
 ## Known Notes
 
