@@ -17,6 +17,9 @@ on the display. OTA-compatible with v1.6.2 (no partition table change).
   text with `Ä Ö Ü ß ä ö ü` no longer appear as blank tofu. Dosis and
   Montserrat now include printable ASCII, the degree sign, and those Latin
   glyphs.
+- **Latin-1, Euro and Latin Extended-A**: The same fonts now cover `€ µ Ø × ± ² ³`,
+  en-dash, typographic quotes, and Central/Eastern European letters
+  (`ł ě ă ő ą`, …).
 - **UTF-8 strings stay intact**: Truncating job names, status labels and
   short display names no longer splits a multi-byte character in the middle.
 
