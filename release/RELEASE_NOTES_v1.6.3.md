@@ -22,6 +22,8 @@ on the display. OTA-compatible with v1.6.2 (no partition table change).
   (`ł ě ă ő ą`, …).
 - **UTF-8 strings stay intact**: Truncating job names, status labels and
   short display names no longer splits a multi-byte character in the middle.
+- **Faster page flicks**: Short, quick swipes advance the pager even when the
+  touch path only reports a small pixel delta. Snap animation is shorter.
 
 ## Known Notes
 
